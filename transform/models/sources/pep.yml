@@ -1,0 +1,17 @@
+version: 2
+
+# Bronze tables written by the connector. It creates all of them every run,
+# so a property that never sends a file type still builds.
+sources:
+  - name: pep
+    database: "{{ var('bq_project') }}"
+    schema: "bronze_{{ var('org_id') }}"
+    tables:
+      - name: reservations
+        identifier: "pep__reservations_{{ var('property_slug') }}"
+      - name: rate_plan_summary
+        identifier: "pep__rate_plan_summary_{{ var('property_slug') }}"
+      - name: occupancy_summary
+        identifier: "pep__occupancy_summary_{{ var('property_slug') }}"
+      - name: transactions
+        identifier: "pep__transactions_{{ var('property_slug') }}"

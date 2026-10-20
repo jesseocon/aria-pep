@@ -1,0 +1,145 @@
+version: 2
+
+# PMS gold standard. Every PMS connector builds these two tables with exactly
+# these columns and types (the contract fails the build otherwise). Values are
+# passed through as the PMS sends them.
+
+models:
+  - name: mlt_mart__pms__stay_night
+    description: One row per reservation per stay night (arrival through the night before departure).
+    config:
+      contract:
+        enforced: true
+    columns:
+      - name: pms
+        data_type: string
+        description: Source PMS, e.g. `pep`.
+      - name: property_id
+        data_type: string
+        description: Aria property id.
+      - name: stay_date
+        data_type: date
+        description: The night stayed.
+      - name: reservation_id
+        data_type: string
+        description: Stable reservation id across exports. PEP's External Confirmation Number.
+      - name: confirmation_number
+        data_type: string
+        description: PMS confirmation number.
+      - name: booking_date
+        data_type: date
+      - name: cancellation_date
+        data_type: date
+      - name: arrival_date
+        data_type: date
+      - name: departure_date
+        data_type: date
+      - name: status
+        data_type: string
+        description: Reservation status as the PMS reports it.
+      - name: market_segment
+        data_type: string
+        description: Market segment name as the PMS reports it.
+      - name: market_segment_code
+        data_type: string
+      - name: rate_plan
+        data_type: string
+        description: Rate plan code as the PMS reports it.
+      - name: source
+        data_type: string
+        description: Booking source (channel) as the PMS reports it.
+      - name: room_revenue
+        data_type: numeric
+        description: Revenue for this night. PEP gives the average room rate, so every night of a stay has the same value.
+      - name: room_night
+        data_type: int64
+        description: Always 1.
+      - name: is_occupied_night
+        data_type: boolean
+        description: False when status is cancelled or no show.
+      - name: _silver_loaded_at
+        data_type: timestamp
+      - name: _loaded_at
+        data_type: timestamp
+
+  - name: mlt_dim__pms__rate_plan
+    description: >
+      Readable rate plans: the latest name per rate plan code. Join to the stay
+      and OTB tables on pms, property_id, rate_plan.
+    config:
+      contract:
+        enforced: true
+    columns:
+      - name: pms
+        data_type: string
+      - name: property_id
+        data_type: string
+      - name: rate_plan
+        data_type: string
+        description: Rate plan code, as on the reservation.
+      - name: rate_plan_name
+        data_type: string
+      - name: rate_code_status
+        data_type: string
+        description: Active or Inactive, as the PMS reports it.
+      - name: market_segment
+        data_type: string
+      - name: market_segment_code
+        data_type: string
+      - name: last_seen_date
+        data_type: date
+        description: Latest report date the code appeared on.
+      - name: _silver_loaded_at
+        data_type: timestamp
+      - name: _loaded_at
+        data_type: timestamp
+
+  - name: mlt_mart__pms__otb_night
+    description: >
+      One row per reservation, per stay night, per as-of date it was on the books:
+      booked on or before the as-of date and not cancelled by it.
+    config:
+      contract:
+        enforced: true
+    columns:
+      - name: pms
+        data_type: string
+      - name: property_id
+        data_type: string
+      - name: stay_date
+        data_type: date
+      - name: as_of_date
+        data_type: date
+        description: The date the books are viewed from.
+      - name: reservation_id
+        data_type: string
+      - name: confirmation_number
+        data_type: string
+      - name: booking_date
+        data_type: date
+      - name: cancellation_date
+        data_type: date
+      - name: arrival_date
+        data_type: date
+      - name: departure_date
+        data_type: date
+      - name: status
+        data_type: string
+      - name: market_segment
+        data_type: string
+      - name: market_segment_code
+        data_type: string
+      - name: rate_plan
+        data_type: string
+      - name: source
+        data_type: string
+      - name: room_revenue
+        data_type: numeric
+      - name: room_night
+        data_type: int64
+      - name: is_occupied_night
+        data_type: boolean
+      - name: _silver_loaded_at
+        data_type: timestamp
+      - name: _loaded_at
+        data_type: timestamp

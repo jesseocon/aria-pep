@@ -1,0 +1,8 @@
+.git
+**/.venv
+**/__pycache__
+**/.pytest_cache
+transform/target
+transform/logs
+transform/dbt_packages
+out

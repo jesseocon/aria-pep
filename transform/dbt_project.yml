@@ -1,0 +1,28 @@
+name: aria_pep
+version: "1.0"
+profile: meltano
+config-version: 2
+require-dbt-version: [">=1.0.0", "<2.0.0"]
+flags:
+  send_anonymous_usage_stats: false
+
+model-paths: [models]
+macro-paths: [macros]
+target-path: target
+clean-targets: [target, dbt_packages, logs]
+
+vars:
+  bq_project: "{{ env_var('ARIA_BQ_PROJECT', 'hospitalityops-dev') }}"
+  org_id: "{{ env_var('ARIA_ORG_ID', '1782243883257222643') }}"
+  property_id: "{{ env_var('ARIA_PROPERTY_ID', 'cmrmb56w4000dbqu95a06jr1t') }}"
+  property_slug: "{{ env_var('ARIA_PROPERTY_SLUG', 'hilton-garden-inn-boston-burlington-ma') }}"
+  source: pep
+
+models:
+  aria_pep:
+    staging:
+      +materialized: table
+      +schema: silver
+    marts:
+      +materialized: table
+      +schema: gold
