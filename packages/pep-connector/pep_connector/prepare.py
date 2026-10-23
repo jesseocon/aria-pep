@@ -7,9 +7,12 @@ alone. A file that fails to heal is reported and does not stop the others.
 from __future__ import annotations
 
 import csv
+from collections import Counter
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
+from typing import Protocol
 
 from pep_connector.parse import HealResult, heal_text
 from pep_connector.reports import REPORT_STREAMS, ReportStream
@@ -18,6 +21,13 @@ from pep_connector.span import output_name, span_dates
 
 RESERVATIONS = "reservations"
 STAGING_NAME = "_staging.csv"
+
+# A file loads only when nearly every row came through. If the heal cannot read a
+# property's export, the file fails and stays in the folder; it never loads just the
+# rows the heal happened to understand.
+MAX_QUARANTINED_SHARE = 0.01
+QUARANTINE_ALLOWANCE = 5
+NOT_COUNTED = frozenset({"removed_summary_row", "out_of_scope"})
 
 
 @dataclass(frozen=True)
@@ -114,6 +124,26 @@ def _row(result: HealResult, record_fields: dict[str, str], source_line: int, st
     return row
 
 
+class HealedRecord(Protocol):
+    source_line: int
+    parse_status: str
+    heal_action: str
+
+
+def check_quarantine(name: str, records: Sequence[HealedRecord]) -> None:
+    """Raise when more than 1% (and more than a handful) of a file's rows were quarantined."""
+    counted = [record for record in records if record.parse_status not in NOT_COUNTED]
+    bad = [record for record in counted if record.parse_status == "quarantined"]
+    if len(bad) <= max(QUARANTINE_ALLOWANCE, MAX_QUARANTINED_SHARE * len(counted)):
+        return
+    reasons = Counter(record.heal_action for record in bad).most_common(3)
+    lines = [record.source_line for record in bad[:5]]
+    raise ValueError(
+        f"{name}: {len(bad)} of {len(counted)} rows could not be read (limit 1%), "
+        f"first at lines {lines}; reasons: {reasons}"
+    )
+
+
 def prepare_reservations(
     sources: list[tuple[str, str]],
     output_dir: Path,
@@ -127,9 +157,10 @@ def prepare_reservations(
     for name, text in sources:
         try:
             result = heal_text(text, name)
+            check_quarantine(name, result.records)
             kept = result.kept
             if not kept:
-                raise ValueError(f"{name}: every row was quarantined")
+                raise ValueError(f"{name}: no reservation rows")
             start, end = span_dates(kept)
         except ValueError as exc:
             if failed is None:
@@ -162,6 +193,7 @@ def prepare_reservations(
                 healed=sum(record.parse_status == "healed" for record in result.records),
                 quarantined=sum(record.parse_status == "quarantined" for record in result.records),
                 sections=result.section_header_count,
+                removed=sum(record.parse_status in NOT_COUNTED for record in result.records),
             )
         )
     _write_csv(output_dir / staging_name, OUTPUT_HEADERS, list(bronze.values()))
@@ -182,6 +214,7 @@ def prepare_report(
     for name, text in sources:
         try:
             heal = stream.heal(text)
+            check_quarantine(name, heal.records)
         except ValueError as exc:
             if failed is None:
                 raise
@@ -221,9 +254,7 @@ def prepare_report(
                 quarantined=sum(record.parse_status == "quarantined" for record in heal.records),
                 sections=heal.sections,
                 stream=stream.name,
-                removed=sum(
-                    record.parse_status in ("removed_summary_row", "out_of_scope") for record in heal.records
-                ),
+                removed=sum(record.parse_status in NOT_COUNTED for record in heal.records),
             )
         )
 

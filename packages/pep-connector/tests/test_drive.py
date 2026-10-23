@@ -26,6 +26,19 @@ def _csv() -> bytes:
     fields[26] = "Jan 15, 2025"
     fields[30] = "Feb 1, 2025"
     fields[32] = "Feb 3, 2025"
+    for header, value in {
+        "Booking Time": "9:00 AM",
+        "Nights": "2",
+        "Adults": "1",
+        "CHILDREN": "0",
+        "Total Charges": "$230.00",
+        "Total Room Revenue": "$200.00",
+        "Total Taxes": "$30.00",
+        "Total Payments": "$0.00",
+        "Balance": "$230.00",
+        "Average Room Rate": "$100.00",
+    }.items():
+        fields[V1_DISPLAY_HEADERS.index(header)] = value
     header = ",".join(f'"{header}"' for header in V1_DISPLAY_HEADERS)
     row = ",".join(f'"{value}"' for value in fields)
     return f"{header}\n{row}\n".encode()

@@ -11,6 +11,8 @@ import re
 from dataclasses import dataclass
 from typing import Callable
 
+from pep_connector.assemble import CONFIRMATION as CONFIRMATION_PATTERN
+from pep_connector.assemble import COUNT, DATE, MONEY, TIME, Layout, assemble, optional, required
 from pep_connector.parse import parse_csv_records
 
 BLOCK_COLUMNS = [
@@ -332,7 +334,6 @@ TRANSACTIONS_HEADERS = [
 ]
 _TRANSACTIONS_ANY_SECTION = '"Date","Time"'
 _TRANSACTIONS_GUEST = '"Date","Time","Confirmation Number","Guest Name"'
-_TRANSACTIONS_ROW_START = re.compile(r'^"[A-Za-z]{3} \d{1,2}, \d{4}","')
 _V2_WIDTH = len(TRANSACTIONS_V2_DISPLAY)
 _COMBINED_AT = TRANSACTIONS_V2_DISPLAY.index("Folio Number")
 _COMBINED_EXTRA = [
@@ -371,12 +372,19 @@ def _transactions_guest_section(text: str) -> tuple[str, int, bool]:
     return "\n".join(kept), sections, combined
 
 
-def _fit(fields: list[str], width: int) -> tuple[list[str], str]:
-    if len(fields) > width:
-        return [*fields[: width - 1], ",".join(fields[width - 1 :])], "merged_overflow"
-    if len(fields) < width:
-        return [*fields, *[""] * (width - len(fields))], "padded"
-    return fields, ""
+# Typed columns of the transactions export (display header, lowercased); formats are
+# PEP's own. A row starts with date, time and confirmation number (blank on group,
+# house account and company postings in the combined section).
+TRANSACTION_TYPES = {
+    "date": required(DATE),
+    "time": optional(TIME),
+    "confirmation number": optional(CONFIRMATION_PATTERN),
+    "folio number": optional(COUNT),
+    "amount": optional(MONEY),
+    "quantity": optional(COUNT),
+    "adults": optional(COUNT),
+}
+TRANSACTION_ANCHOR_WIDTH = 3
 
 
 def _transactions_v2(fields: list[str]) -> list[str]:
@@ -385,16 +393,10 @@ def _transactions_v2(fields: list[str]) -> list[str]:
     return [*fields[:4], "", "", *fields[4:24], "", ""]
 
 
-def _transactions_width(fields: list[str], combined: bool = False) -> tuple[list[str], str]:
+def _to_v2(values: list[str], combined: bool) -> list[str]:
     if combined:
-        fitted, action = _fit(fields, _COMBINED_WIDTH)
-        return [*fitted[:_COMBINED_AT], *fitted[_COMBINED_AT + len(_COMBINED_EXTRA) :]], action
-    normalized = _transactions_v2(fields)
-    if len(normalized) > _V2_WIDTH:
-        return [*normalized[: _V2_WIDTH - 1], ",".join(normalized[_V2_WIDTH - 1 :])], "merged_overflow"
-    if len(normalized) < _V2_WIDTH:
-        return [*normalized, *[""] * (_V2_WIDTH - len(normalized))], "padded"
-    return normalized, ""
+        return [*values[:_COMBINED_AT], *values[_COMBINED_AT + len(_COMBINED_EXTRA) :]]
+    return _transactions_v2(values)
 
 
 def _valid_transaction(fields: list[str]) -> bool:
@@ -408,8 +410,7 @@ def _valid_transaction(fields: list[str]) -> bool:
 
 def heal_transactions(text: str) -> ReportHeal:
     section, sections, combined = _transactions_guest_section(text)
-    lines = re.split(r"\r?\n", section)
-    header = parse_csv_records(lines[0]) if lines else []
+    header = parse_csv_records(re.split(r"\r?\n", section, maxsplit=1)[0]) if section else []
     if not header:
         raise ValueError("Missing CSV header row")
     layouts = {
@@ -419,33 +420,25 @@ def heal_transactions(text: str) -> ReportHeal:
     }
     if len(header[0]) not in layouts:
         raise ValueError(f"Expected {' or '.join(map(str, layouts))} columns, got {len(header[0])}")
-    _validate(header[0], layouts[len(header[0])])
+    display = layouts[len(header[0])]
+    _validate(header[0], display)
     combined = len(header[0]) == _COMBINED_WIDTH
-
-    chunks: list[tuple[str, int, int]] = []
-    current: list[str] = []
-    start = 0
-    for index in range(1, len(lines)):
-        line = lines[index]
-        if not line.strip():
-            continue
-        if _TRANSACTIONS_ROW_START.match(line):
-            if current:
-                chunks.append(("\n".join(current), start, len(current)))
-            current, start = [line], index + 1
-        elif not current:
-            current, start = [line], index + 1
-        else:
-            current.append(line)
-    if current:
-        chunks.append(("\n".join(current), start, len(current)))
+    layout = Layout(display, TRANSACTION_TYPES, TRANSACTION_ANCHOR_WIDTH)
 
     records: list[ReportRecord] = []
-    for chunk, line, count in chunks:
-        parsed = parse_csv_records(chunk)
-        fields, action = _transactions_width(parsed[0] if parsed else [""] * _V2_WIDTH, combined)
-        actions = (["merged_continuation"] if count > 1 else []) + ([action] if action else [])
-        if combined and not _strip(fields[2]) and display_date(fields[0], trim_inside=False) is not None:
+    for row in assemble(section, layout):
+        actions = list(row.actions)
+        if row.summary:
+            fields = [*row.values[:_V2_WIDTH], *[""] * (_V2_WIDTH - len(row.values))]
+            records.append(ReportRecord(fields, row.line, "removed_summary_row", "|".join(actions)))
+            continue
+        if row.problem is not None:
+            actions.append(row.problem)
+            fields = [*row.values[:_V2_WIDTH], *[""] * (_V2_WIDTH - len(row.values))]
+            records.append(ReportRecord(fields, row.line, "quarantined", "|".join(actions)))
+            continue
+        fields = _to_v2(row.values, combined)
+        if combined and not _strip(fields[2]):
             status = "out_of_scope"
         elif not _valid_transaction(fields):
             status = "quarantined"
@@ -453,7 +446,7 @@ def heal_transactions(text: str) -> ReportHeal:
             status = "healed"
         else:
             status = "ok"
-        records.append(ReportRecord(fields, line, status, "|".join(actions)))
+        records.append(ReportRecord(fields, row.line, status, "|".join(actions)))
     return ReportHeal(records, sections)
 
 
