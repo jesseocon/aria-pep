@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import re
+from pep_connector.assemble import CODE, CONFIRMATION, COUNT, DATE, MONEY, TIME, Layout, optional, required
 
 V1_COLUMN_COUNT = 63
 V2_COLUMN_COUNT = 66
@@ -223,23 +223,34 @@ OUTPUT_HEADERS = [
 
 SPAN_FIELDS = ("booking_date", "cancellation_date", "arrival_date", "departure_date")
 
-STATUSES = {
-    "CHECKED OUT",
-    "CANCELLED",
-    "No Show",
-    "IN HOUSE",
-    "RESERVED",
-    "CHECKED IN",
-    "DUE IN",
-    "DUE OUT",
-    "WAITLIST",
-    "Arrival",
-    "Pending Departure",
-}
-
 SECTION_HEADER_PREFIX = '"Market Segment Code","Local Market Segment Code","Confirmation Number"'
-ROW_START = re.compile(r'^"[A-Z0-9*]{1,10}","","?\d{8,12}"?')
-CONFIRMATION = re.compile(r"^\d{8,12}$")
+
+# Typed columns of the reservation export (display header, lowercased). The formats are
+# PEP's own, so they hold for every property; any other column is text. Every
+# reservation carries the required ones (only a totals line leaves them blank), which
+# is what lets a split row be realigned without guessing.
+RESERVATION_TYPES = {
+    "market segment code": required(CODE),
+    "local market segment code": optional(CODE),
+    "confirmation number": required(CONFIRMATION),
+    "booking date": required(DATE),
+    "booking time": required(TIME),
+    "cancellation date": optional(DATE),
+    "cancellation time": optional(TIME),
+    "arrival date": required(DATE),
+    "departure date": required(DATE),
+    "nights": required(COUNT),
+    "adults": required(COUNT),
+    "children": required(COUNT),
+    "total charges": required(MONEY),
+    "total room revenue": required(MONEY),
+    "total taxes": required(MONEY),
+    "total payments": required(MONEY),
+    "balance": required(MONEY),
+    "average room rate": required(MONEY),
+}
+# A row starts with market segment code, local market segment code, confirmation number.
+RESERVATION_ANCHOR_WIDTH = 3
 
 
 def display_version(headers: list[str]) -> int:
@@ -267,3 +278,9 @@ def normalize_to_v2(fields: list[str]) -> list[str]:
     if len(fields) == V2_COLUMN_COUNT or len(fields) != V1_COLUMN_COUNT:
         return fields
     return [*fields[:11], "", "", *fields[11:30], "", *fields[30:]]
+
+
+RESERVATION_LAYOUTS = {
+    1: Layout(V1_DISPLAY_HEADERS, RESERVATION_TYPES, RESERVATION_ANCHOR_WIDTH),
+    2: Layout(V2_DISPLAY_HEADERS, RESERVATION_TYPES, RESERVATION_ANCHOR_WIDTH),
+}

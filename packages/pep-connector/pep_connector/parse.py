@@ -1,20 +1,20 @@
 """Heal a PEP reservation export.
 
-Remark fields contain raw newlines, and one download repeats the header several
-times. Only the first section is the reservation list. Rows that cannot be
-aligned, or that have no external confirmation number, are quarantined.
+One download repeats the header several times; only the first section is the
+reservation list. Its rows are rebuilt by ``assemble`` (unescaped quotes, line breaks
+and split fields in text). Rows that cannot be aligned, or that have no external
+confirmation number, are quarantined; every row is counted either way.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
+from pep_connector.assemble import assemble
 from pep_connector.schema import (
-    CONFIRMATION,
     HEADERS,
-    ROW_START,
+    RESERVATION_LAYOUTS,
     SECTION_HEADER_PREFIX,
-    STATUSES,
     V2_COLUMN_COUNT,
     normalize_to_v2,
     validate_display_headers,
@@ -38,7 +38,7 @@ class HealResult:
 
     @property
     def kept(self) -> list[Record]:
-        return [record for record in self.records if record.parse_status != "quarantined"]
+        return [record for record in self.records if record.parse_status in ("ok", "healed")]
 
 
 def parse_csv_records(text: str) -> list[list[str]]:
@@ -98,32 +98,8 @@ def _strip(value: str) -> str:
     return value.strip().strip('"')
 
 
-def _looks_like_guest(value: str) -> bool:
-    trimmed = _strip(value)
-    return "," in trimmed and trimmed not in STATUSES
-
-
-def _fit_width(fields: list[str]) -> tuple[list[str], str]:
-    canonical = normalize_to_v2(fields)
-    if len(canonical) > V2_COLUMN_COUNT:
-        head = canonical[: V2_COLUMN_COUNT - 1]
-        head.append(",".join(canonical[V2_COLUMN_COUNT - 1 :]))
-        return head, "merged_overflow"
-    if len(canonical) < V2_COLUMN_COUNT:
-        return [*canonical, *[""] * (V2_COLUMN_COUNT - len(canonical))], "padded"
-    action = "normalized_v1" if len(canonical) != len(fields) else ""
-    return canonical, action
-
-
-def _valid(fields: list[str]) -> bool:
-    if len(fields) != V2_COLUMN_COUNT or not CONFIRMATION.match(_strip(fields[2])):
-        return False
-    status = _strip(fields[9])
-    if status in STATUSES:
-        return True
-    if status == "" and _looks_like_guest(fields[10]):
-        return True
-    return _looks_like_guest(status) and _strip(fields[10]) == ""
+def _fit(values: list[str], width: int) -> list[str]:
+    return [*values[:width], *[""] * (width - len(values))]
 
 
 def heal_text(text: str, source_file: str) -> HealResult:
@@ -134,51 +110,30 @@ def heal_text(text: str, source_file: str) -> HealResult:
     header_records = parse_csv_records(lines[0])
     if not header_records:
         raise ValueError(f"{source_file}: missing CSV header row")
-    validate_display_headers(header_records[0])
-
-    chunks: list[tuple[str, int, int]] = []
-    current: list[str] = []
-    source_line = 0
-    for index, line in enumerate(lines[1:], start=2):
-        if not line.strip():
-            continue
-        if ROW_START.match(line):
-            if current:
-                chunks.append(("\n".join(current), source_line, len(current)))
-            current = [line]
-            source_line = index
-            continue
-        if not current:
-            current = [line]
-            source_line = index
-        else:
-            current.append(line)
-    if current:
-        chunks.append(("\n".join(current), source_line, len(current)))
+    version = validate_display_headers(header_records[0])
 
     records: list[Record] = []
-    for chunk, line_no, line_count in chunks:
-        parsed = parse_csv_records(chunk)
-        raw = parsed[0] if parsed else [""] * V2_COLUMN_COUNT
-        fields, action = _fit_width(raw)
-        actions: list[str] = []
-        if line_count > 1:
-            actions.append("merged_continuation")
-        if action:
-            actions.append(action)
-        if not _valid(fields):
+    for row in assemble(section, RESERVATION_LAYOUTS[version]):
+        actions = list(row.actions)
+        if row.problem is None and not row.summary and version == 1:
+            fields = normalize_to_v2(row.values)
+            actions.append("normalized_v1")
+        else:
+            fields = _fit(row.values, V2_COLUMN_COUNT)
+        if row.summary:
+            status = "removed_summary_row"
+        elif row.problem is not None:
             status = "quarantined"
+            actions.append(row.problem)
         elif not _strip(fields[5]):
             status = "quarantined"
             actions.append("missing_external_confirmation_number")
-        elif actions:
-            status = "healed"
         else:
-            status = "ok"
+            status = "healed" if actions else "ok"
         records.append(
             Record(
                 fields=dict(zip(HEADERS, fields, strict=True)),
-                source_line=line_no,
+                source_line=row.line,
                 parse_status=status,
                 heal_action="|".join(actions),
             )

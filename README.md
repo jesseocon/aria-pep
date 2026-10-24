@@ -8,14 +8,26 @@ Drop any of these PEP exports into the connection's Drive folder. The header row
 
 | Export | Heal (ported from `aria-lighthouse/packages/transform/src/pep`) | Bronze merge |
 | --- | --- | --- |
-| Reservations | First section only, remark newlines rejoined, v1 → v2, rows without an external confirmation number quarantined | Upsert on `external_confirmation_number`; the export whose range ends later wins |
+| Reservations | First section only, rows rebuilt (see below), v1 → v2, rows without an external confirmation number quarantined | Upsert on `external_confirmation_number`; the export whose range ends later wins |
 | Rate Plan Summary | Totals row removed, rows without a date or code quarantined | Replace the export's date range |
 | Occupancy Summary | Totals row removed | Replace the export's date range |
-| Transactions | Guest folio section only, remark newlines rejoined, v1 → v2, invalid rows quarantined | Replace the export's date range |
+| Transactions | Guest folio section only, rows rebuilt (see below), v1 → v2, invalid rows quarantined | Replace the export's date range |
 
 A daily report export is the whole truth for its dates, from its first to its last date. Bronze deletes those dates and inserts the export's rows in one transaction. Other dates are not touched. When two exports in one run cover the same date, the one whose range ends later supplies it.
 
 Each heal was checked against the TypeScript on the Lighthouse sample exports. All rows match: reservations 11,683, rate plan summary 730,650, occupancy summary 918, transactions 482,516.
+
+### Rebuilding rows
+
+PEP quotes every field but does not escape quotes inside text, some text holds line breaks, and some holds `",`, which splits a field in two. Reservations and Transactions rows are rebuilt from what PEP's columns are, never from what one property's values look like (`pep_connector/assemble.py`):
+
+- A quote closes a field only when a comma, a line end or the end of the file follows it, so `ask for "John"` stays text.
+- A row starts at a record whose leading columns have PEP's row-start types (reservations: market segment code, local market segment code, confirmation number; transactions: date, time, confirmation number). Anything else is the rest of the row above, and that row is parsed again with its line breaks kept as text.
+- A row wider than the header is merged back at the first text column that leaves every typed column (dates, times, money, counts) in shape. A totals line is removed. Rows that still do not fit are quarantined.
+
+Every row start yields exactly one row, so nothing is dropped without being counted. A file in which more than 1% of rows (and more than 5) are quarantined fails instead of loading what could be read; the message names the first lines and the reasons. A new property's export that breaks in a new way therefore fails its first run instead of loading part of the hotel.
+
+The first version anchored rows on a raw-line pattern that required an empty local market segment code. At a property that uses local codes, most rows were glued onto the row above and dropped: Dallas Love Field loaded 21–29% of its reservations. With the rebuild, stay nights for July–September 2026 match the Occupancy Summary within 0.05% (83 of 92 nights exact, none off by more than 3 rooms).
 
 ## Flow
 
@@ -29,7 +41,7 @@ Each run, in order. Every step is safe to repeat.
 6. **Gold** (dbt). See the gold contract below.
 7. **File away.** The originals move to `processed/<UTC timestamp>/` in the Drive folder after dbt succeeds, for each file type whose load succeeded. Nothing is uploaded: service accounts have no My Drive storage, and the healed rows are in BigQuery.
 
-Failures: a file that fails to heal, or a file type that fails to load, stays in the folder and fails the run, and the other types still go through. If dbt fails, nothing moves.
+Failures: a file that fails to heal (including one with more than 1% of rows quarantined), or a file type that fails to load, stays in the folder and fails the run, and the other types still go through. If dbt fails, nothing moves.
 
 The run log shows each file (type, ok, healed, quarantined, sections, summary rows), staging and bronze row counts per type, the full dbt output, unrecognized files, and the Drive destination.
 
