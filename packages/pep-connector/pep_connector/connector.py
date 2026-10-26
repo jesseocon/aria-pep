@@ -10,6 +10,9 @@ to repeat.
 from __future__ import annotations
 
 import logging
+import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -80,7 +83,8 @@ class PepConnector:
         raw = ctx.params.get("input_dir") or ctx.config.get("input_dir")
         if raw:
             ctx.logger.info("local input %s", raw)
-            prepared = prepare_run(Path(str(raw)), out)
+            with _step(ctx, "extract"):
+                prepared = prepare_run(Path(str(raw)), out)
             log_prepared(ctx.logger, prepared, prepared.unrecognized, prepared.failed)
             loads, failed_streams = _load(ctx, prepared)
             metrics = {"status": "ready", "files": len(prepared.files), "rows": prepared.rows, "bronze": loads}
@@ -91,7 +95,8 @@ class PepConnector:
         folder_id = str(ctx.config.get("drive_folder_id") or "")
         ctx.logger.info("drive folder %s as %s", folder_id, drive_impersonate())
         service = build_service()
-        outcome = fetch_drive(folder_id, out, service=service)
+        with _step(ctx, "extract"):
+            outcome = fetch_drive(folder_id, out, service=service)
         log_outcome(ctx.logger, outcome)
         if outcome.status == "waiting":
             ctx.logger.info("a file changed in the last minute; nothing loaded, nothing moved")
@@ -122,10 +127,29 @@ class PepConnector:
         )
 
 
+@contextmanager
+def _step(ctx: RunContext, name: str) -> Iterator[None]:
+    """A phase of the run that happens in this process, reported to the run log."""
+    ctx.report("step.started", step=name)
+    started = time.monotonic()
+    ok = False
+    try:
+        yield
+        ok = True
+    finally:
+        ctx.report("step.finished", step=name, ok=ok, seconds=round(time.monotonic() - started, 1))
+
+
 def _load(ctx: RunContext, prepared: PreparedRun) -> tuple[list[dict[str, Any]], set[str]]:
+    with _step(ctx, "load"):
+        return _load_batches(ctx, prepared)
+
+
+def _load_batches(ctx: RunContext, prepared: PreparedRun) -> tuple[list[dict[str, Any]], set[str]]:
     loads: list[dict[str, Any]] = []
     failed: set[str] = set()
     for batch in prepared.batches.values():
+        ctx.report("stream.started", stream=batch.stream)
         for environment in target_environments(ctx):
             rendered = dbt_vars(ctx.config, environment, ctx.connection_id)
             try:
@@ -159,6 +183,11 @@ def _load(ctx: RunContext, prepared: PreparedRun) -> tuple[list[dict[str, Any]],
                     "merged_rows": result.merged_rows,
                 }
             )
+        if batch.stream in failed:
+            ctx.report("stream.skipped", stream=batch.stream, reason="failed to load; its files stay in the folder",
+                       code="load_failed")
+        else:
+            ctx.report("stream.finished", stream=batch.stream, records=batch.rows)
     return loads, failed
 
 
