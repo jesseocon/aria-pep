@@ -91,6 +91,7 @@ def run_dbt(ctx: RunContext) -> list[str]:
             ],
             env=env,
             cwd=project,
+            step="transform",
         )
         ran.append(environment)
     return ran

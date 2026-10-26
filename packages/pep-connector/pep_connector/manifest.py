@@ -73,6 +73,7 @@ def manifest() -> dict[str, Any]:
         "version": _version(),
         "description": "Hilton PEP reservation files to PMS stay nights and reservation-night OTB.",
         "job": {"name": JOB_NAME, "timeout_seconds": 60 * 60},
+        "progress": "v1",
         "config_schema": CONFIG_SCHEMA,
         "run_params_schema": RUN_PARAMS_SCHEMA,
     }
