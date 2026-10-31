@@ -36,6 +36,7 @@ SELECT
   status,
   market_segment,
   market_segment_code,
+  CAST(NULL AS STRING) AS market_group,
   rate_plan,
   source,
   CAST(average_room_rate AS NUMERIC) AS room_revenue,

@@ -38,6 +38,7 @@ SELECT
   n.status,
   n.market_segment,
   n.market_segment_code,
+  n.market_group,
   n.rate_plan,
   n.source,
   n.room_revenue,
