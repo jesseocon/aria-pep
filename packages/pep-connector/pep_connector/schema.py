@@ -1,4 +1,9 @@
-"""PEP reservation export columns. Output is always the 66-column v2 layout."""
+"""PEP reservation export columns. Output is always the 66-column v2 layout.
+
+An export may leave columns out: Hilton's report scheduler lets the property drop some
+(Scenic's emailed package drops the five remarks columns). Such a header is read by name
+when it keeps v2's order and every typed column; the columns it leaves out are empty.
+"""
 
 from __future__ import annotations
 
@@ -272,6 +277,31 @@ def validate_display_headers(headers: list[str]) -> int:
                 f'Header mismatch at column {index + 1}: expected "{expected[index]}", got "{header}"'
             )
     return version
+
+
+def trimmed_positions(headers: list[str]) -> list[int] | None:
+    """Where each column of a trimmed export sits in v2, or None when it is not one.
+
+    A trimmed export keeps v2's order, has no column v2 lacks, and keeps every typed column
+    and the external confirmation number (the row rebuild and the bronze key need them).
+    """
+    v2 = [header.lower() for header in V2_DISPLAY_HEADERS]
+    names = [header.strip().lower() for header in headers]
+    if len(names) >= V2_COLUMN_COUNT or any(name not in v2 for name in names):
+        return None
+    positions = [v2.index(name) for name in names]
+    if positions != sorted(set(positions)):
+        return None
+    if any(name not in names for name in [*RESERVATION_TYPES, "external confirmation number"]):
+        return None
+    return positions
+
+
+def spread_to_v2(fields: list[str], positions: list[int]) -> list[str]:
+    out = [""] * V2_COLUMN_COUNT
+    for position, value in zip(positions, fields, strict=False):
+        out[position] = value
+    return out
 
 
 def normalize_to_v2(fields: list[str]) -> list[str]:

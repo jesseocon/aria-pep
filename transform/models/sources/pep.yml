@@ -13,5 +13,7 @@ sources:
         identifier: "pep__rate_plan_summary_{{ var('property_slug') }}"
       - name: occupancy_summary
         identifier: "pep__occupancy_summary_{{ var('property_slug') }}"
+      - name: occupancy_forecast
+        identifier: "pep__occupancy_forecast_{{ var('property_slug') }}"
       - name: transactions
         identifier: "pep__transactions_{{ var('property_slug') }}"

@@ -1,4 +1,4 @@
-"""Heal PEP daily report exports: rate plan summary, occupancy summary, transactions.
+"""Heal PEP daily report exports: rate plan summary, occupancy summary and forecast, transactions.
 
 Ported from aria-lighthouse/packages/transform/src/pep/{rate-plan-summary,
 occupancy-summary,transactions}. Each export is the whole truth for its date
@@ -59,6 +59,9 @@ class ReportStream:
     kept: frozenset[str]
     trim_dates: bool = True
     header_anywhere: bool = False
+    # A snapshot stream keeps every export: bronze replaces only the rows of an export that
+    # starts on the same day (a resend), keyed by `block_start_date`, never other days' rows.
+    snapshot: bool = False
 
     def row_date(self, fields: list[str]) -> str | None:
         return display_date(fields[0], trim_inside=self.trim_dates)
@@ -225,23 +228,116 @@ OCCUPANCY_HEADERS = [
 ]
 
 
-def heal_occupancy_summary(text: str) -> ReportHeal:
+def _heal_one_row_per_date(text: str, display: list[str]) -> ReportHeal:
     rows = parse_csv_records(text)
     if not rows:
         return ReportHeal([], 0)
-    _validate(rows[0], OCCUPANCY_DISPLAY)
+    _validate(rows[0], display)
     records: list[ReportRecord] = []
     for index, row in enumerate(rows[1:]):
         if all(not value.strip() for value in row):
             continue
-        if len(row) != len(OCCUPANCY_DISPLAY):
-            raise ValueError(f"Expected {len(OCCUPANCY_DISPLAY)} fields, got {len(row)}")
+        if len(row) != len(display):
+            raise ValueError(f"Expected {len(display)} fields, got {len(row)}")
         line = index + 2
         if display_date(row[0]) is None:
             records.append(ReportRecord(row, line, "removed_summary_row", "removed_summary_row"))
         else:
             records.append(ReportRecord(row, line, "ok", ""))
     return ReportHeal(records, 1)
+
+
+def heal_occupancy_summary(text: str) -> ReportHeal:
+    return _heal_one_row_per_date(text, OCCUPANCY_DISPLAY)
+
+
+# Occupancy forecast: one row per future date from the day it ran, trailing totals row.
+# Each export is a snapshot of what is on the books, so every one is kept (see `snapshot`).
+
+OCCUPANCY_FORECAST_DISPLAY = [
+    "Date",
+    "Day Of Week",
+    "Confirmed Revenue",
+    "Group Confirmed Revenue",
+    "Transient Confirmed Revenue",
+    "Allocation Revenue",
+    "Total Revenue",
+    "Total Rooms",
+    "Total Sold Rooms",
+    "Sold Rooms Without Group Rooms",
+    "Total Rooms Sold Excluding Complimentary And House Rooms",
+    "OOO",
+    "AVAILABLE ROOMS",
+    "Group Allocations",
+    "Group Rooms Picked Up",
+    "Total Rooms Sold Allocated",
+    "Arrivals",
+    "Guaranteed",
+    "Non Guaranteed",
+    "Stay Overs",
+    "Departures",
+    "Adults",
+    "CHILDREN",
+    "TOTAL GUESTS",
+    "ADR",
+    "ADR Without Complimentary And House Use Rooms",
+    "Occupancy Including OOO Comp and House Use",
+    "Occupancy Excluding OOO Comp and House Use",
+    "Occupancy Including OOO Excluding Comp and House Use",
+    "Occupancy Excluding OOO Including Comp and House Use",
+    "Occupancy With Group Allocations And Reservations",
+    "Occupancy Without Group Allocations",
+    "Occupancy With Definitive Group Allocations",
+    "REVPAR WITH DOWN ROOMS",
+    "REVPAR WITHOUT DOWN ROOMS",
+    "Day Use Rooms",
+    "Day Use Group Rooms",
+    "Comp Reservations",
+]
+OCCUPANCY_FORECAST_HEADERS = [
+    "date",
+    "day_of_week",
+    "confirmed_revenue",
+    "group_confirmed_revenue",
+    "transient_confirmed_revenue",
+    "allocation_revenue",
+    "total_revenue",
+    "total_rooms",
+    "total_sold_rooms",
+    "sold_rooms_without_group_rooms",
+    "total_rooms_sold_excluding_complimentary_and_house_rooms",
+    "ooo",
+    "available_rooms",
+    "group_allocations",
+    "group_rooms_picked_up",
+    "total_rooms_sold_allocated",
+    "arrivals",
+    "guaranteed",
+    "non_guaranteed",
+    "stay_overs",
+    "departures",
+    "adults",
+    "children",
+    "total_guests",
+    "adr",
+    "adr_without_complimentary_and_house_use_rooms",
+    "occupancy_including_ooo_comp_and_house_use",
+    "occupancy_excluding_ooo_comp_and_house_use",
+    "occupancy_including_ooo_excluding_comp_and_house_use",
+    "occupancy_excluding_ooo_including_comp_and_house_use",
+    "occupancy_with_group_allocations_and_reservations",
+    "occupancy_without_group_allocations",
+    "occupancy_with_definitive_group_allocations",
+    "revpar_with_down_rooms",
+    "revpar_without_down_rooms",
+    "day_use_rooms",
+    "day_use_group_rooms",
+    "comp_reservations",
+]
+
+
+def heal_occupancy_forecast(text: str) -> ReportHeal:
+    return _heal_one_row_per_date(text, OCCUPANCY_FORECAST_DISPLAY)
 
 
 # Transactions: guest folio section only, remark newlines rejoined, v1 -> v2.
@@ -466,6 +562,15 @@ OCCUPANCY_SUMMARY = ReportStream(
     heal=heal_occupancy_summary,
     kept=frozenset({"ok"}),
 )
+OCCUPANCY_FORECAST = ReportStream(
+    name="occupancy_forecast",
+    file_prefix="occupancy-forecast",
+    header_start='"Date","Day Of Week","Confirmed Revenue"',
+    headers=OCCUPANCY_FORECAST_HEADERS,
+    heal=heal_occupancy_forecast,
+    kept=frozenset({"ok"}),
+    snapshot=True,
+)
 TRANSACTIONS = ReportStream(
     name="transactions",
     file_prefix="transactions",
@@ -476,4 +581,4 @@ TRANSACTIONS = ReportStream(
     trim_dates=False,
     header_anywhere=True,
 )
-REPORT_STREAMS = [RATE_PLAN_SUMMARY, OCCUPANCY_SUMMARY, TRANSACTIONS]
+REPORT_STREAMS = [RATE_PLAN_SUMMARY, OCCUPANCY_SUMMARY, OCCUPANCY_FORECAST, TRANSACTIONS]
