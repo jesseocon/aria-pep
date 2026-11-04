@@ -262,7 +262,14 @@ def prepare_report(
         covering = [name for name, (start, end) in ranges.items() if start <= day <= end]
         return max(covering, key=lambda name: (ranges[name][1], name))
 
-    staged = [row for name, rows in by_file.items() for row in rows if winner(row["row_date"]) == name]
+    def latest_from(start: str) -> str:
+        # Two exports of one snapshot (a resend): the later name, which sorts by arrival.
+        return max(name for name, (first, _end) in ranges.items() if first == start)
+
+    if stream.snapshot:
+        staged = [row for name, rows in by_file.items() for row in rows if latest_from(row["block_start_date"]) == name]
+    else:
+        staged = [row for name, rows in by_file.items() for row in rows if winner(row["row_date"]) == name]
     _write_csv(output_dir / STAGING_NAME, stream.output_headers, staged)
     return summaries, staged
 

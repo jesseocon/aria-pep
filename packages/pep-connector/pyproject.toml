@@ -13,6 +13,7 @@ dependencies = [
 
 [project.entry-points."aria_runner.connectors"]
 pep = "pep_connector:connector"
+pep_email = "pep_connector:email_connector"
 
 [build-system]
 requires = ["hatchling"]

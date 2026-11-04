@@ -1,6 +1,9 @@
 # aria-pep
 
-Hilton PEP exports in a Google Drive folder become PMS tables in BigQuery. Runs from aria-runner (connector key `pep`).
+Hilton PEP exports become PMS tables in BigQuery. Two aria-runner connectors share this image and its tables:
+
+- **PEP** (`pep`): exports dropped in a Google Drive folder.
+- **PEP - Email** (`pep_email`): PEP's report scheduler emails a package (a zip of exports) to the connection's address. See [Email](#email).
 
 ## File types
 
@@ -11,11 +14,14 @@ Drop any of these PEP exports into the connection's Drive folder. The header row
 | Reservations | First section only, rows rebuilt (see below), v1 → v2, rows without an external confirmation number quarantined | Upsert on `external_confirmation_number`; the export whose range ends later wins |
 | Rate Plan Summary | Totals row removed, rows without a date or code quarantined | Replace the export's date range |
 | Occupancy Summary | Totals row removed | Replace the export's date range |
+| Occupancy Forecast | Totals row removed | Keep every export (a snapshot, dated by its first day); a resend for the same day replaces that day's only |
 | Transactions | Guest folio section only, rows rebuilt (see below), v1 → v2, invalid rows quarantined | Replace the export's date range |
 
 A daily report export is the whole truth for its dates, from its first to its last date. Bronze deletes those dates and inserts the export's rows in one transaction. Other dates are not touched. When two exports in one run cover the same date, the one whose range ends later supplies it.
 
 Each heal was checked against the TypeScript on the Lighthouse sample exports. All rows match: reservations 11,683, rate plan summary 730,650, occupancy summary 918, transactions 482,516.
+
+A Reservations export may leave columns out, as a scheduled package can (Scenic's drops the five remarks columns). It is read by header name when it keeps PEP's column order and every typed column plus the External Confirmation Number; the columns it leaves out are empty. Any other header fails the file.
 
 ### Rebuilding rows
 
@@ -80,8 +86,20 @@ uv run python -m pep_connector prepare --input path/to/csvs --out out   # heal o
 uv run pytest
 ```
 
+## Email
+
+Each `pep_email` connection takes mail at `files+{inbox key}@reports.aria-ingest.com`: copy it from the connection page in the console (the API returns it as `inbox_address`); every run logs it. The runner keeps each email as a raw `.eml` (aria-runner `inbox` service), and the connection's schedule reads the new ones.
+
+1. **Schedule the package in PEP** to that address. Any of the exports above load; zips are unpacked. Scenic's package (2026-11-03): Reservations today−90, today+90 and 90–365 days, Rate Plan Summary for the last 7 days, Occupancy Forecast for the next 90 days.
+2. **Each run** reads the emails since its bookmark, saves their CSVs as `<received UTC>_<n>_<name>` and heals them as the Drive flow does. Names sort by arrival, so the later email wins a reservation or a day. Then staging, bronze and dbt as above, and the bookmark moves.
+3. **Failures.** A stream that fails to load moves nothing; the next run reads the same emails again. A file that cannot be healed is logged (`heal_failed`), skipped, and fails the run; after a fix, run with `reprocess_from` to read the stored emails again. Mail from outside `allowed_senders` (`sender_not_allowed`) or with no CSV (`ignored_email`) is noted and skipped.
+4. **Missing-email alert** (off by default): set `alert_at` and the first run after it fails with `email_overdue`, naming each of `expected_reports` that has not arrived in the 24 hours before it.
+
+**Taking over from Drive.** Set `bronze_connection_id` to the Drive connection's id. The email connection then loads into that connection's bronze tables, so its history stays; silver and gold are keyed by property id and keep their names. Disable the Drive connection at cutover so the two never load the same tables.
+
+Checked on Scenic's 2026-11-03 package: all five files heal with nothing quarantined (reservations 11,503 rows, 11,143 bookings after the windows overlap; rate plan summary 9,337; occupancy forecast 91 days).
+
 ## Deploy
 
-One Cloud Run job, `python -m aria_runner execute`, like the other connectors. The image installs `dbt-bigquery` through the package dependencies. Connection config: `org_id`, `development_property_id`, `production_property_id`, `drive_folder_id`, `environments`. Development writes to `hospitalityops-dev`, production to `hospitalityops`.
+One Cloud Run job, `python -m aria_runner execute`, like the other connectors. The image installs `dbt-bigquery` through the package dependencies. Connection config: `org_id`, `development_property_id`, `production_property_id`, `drive_folder_id`, `environments`; `pep_email` takes `bronze_connection_id`, `allowed_senders`, `expected_reports`, `alert_at`, `alert_timezone` instead of `drive_folder_id`. Register both manifests: `uv run aria-runner connectors register --installed pep --api-url <API>` and the same with `pep_email`. Development writes to `hospitalityops-dev`, production to `hospitalityops`.
 
-Not deployed yet: the `aria-connector-pep` image and job (push, Terraform entry).

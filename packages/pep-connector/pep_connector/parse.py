@@ -10,13 +10,17 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from pep_connector.assemble import assemble
+from pep_connector.assemble import Layout, assemble
 from pep_connector.schema import (
     HEADERS,
+    RESERVATION_ANCHOR_WIDTH,
     RESERVATION_LAYOUTS,
+    RESERVATION_TYPES,
     SECTION_HEADER_PREFIX,
     V2_COLUMN_COUNT,
     normalize_to_v2,
+    spread_to_v2,
+    trimmed_positions,
     validate_display_headers,
 )
 
@@ -110,12 +114,23 @@ def heal_text(text: str, source_file: str) -> HealResult:
     header_records = parse_csv_records(lines[0])
     if not header_records:
         raise ValueError(f"{source_file}: missing CSV header row")
-    version = validate_display_headers(header_records[0])
+    headers = header_records[0]
+    positions = None
+    try:
+        version = validate_display_headers(headers)
+    except ValueError:
+        positions = trimmed_positions(headers)
+        if positions is None:
+            raise
+        version = 0  # trimmed: read by name
+    layout = RESERVATION_LAYOUTS[version] if positions is None else Layout(headers, RESERVATION_TYPES, RESERVATION_ANCHOR_WIDTH)
 
     records: list[Record] = []
-    for row in assemble(section, RESERVATION_LAYOUTS[version]):
+    for row in assemble(section, layout):
         actions = list(row.actions)
-        if row.problem is None and not row.summary and version == 1:
+        if positions is not None:
+            fields = spread_to_v2(_fit(row.values, len(positions)), positions)
+        elif row.problem is None and not row.summary and version == 1:
             fields = normalize_to_v2(row.values)
             actions.append("normalized_v1")
         else:

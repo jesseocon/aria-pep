@@ -13,6 +13,11 @@ from aria_runner.sdk import RunContext
 BQ_PROJECT = {"development": "hospitalityops-dev", "production": "hospitalityops"}
 
 
+def bronze_slug(ctx: RunContext) -> str:
+    """The label on this connection's bronze tables: its own id, or the connection it took over from."""
+    return str(ctx.config.get("bronze_connection_id") or ctx.connection_id)
+
+
 def dbt_vars(config: dict[str, Any], environment: str, slug: str) -> dict[str, str]:
     """Same shape Lighthouse passes to `dbt --vars`. Plain strings, not Jinja."""
     property_key = (
@@ -57,7 +62,7 @@ def run_dbt(ctx: RunContext) -> list[str]:
     dbt = dbt_executable()
     ran: list[str] = []
     for environment in target_environments(ctx):
-        rendered = dbt_vars(ctx.config, environment, ctx.connection_id)
+        rendered = dbt_vars(ctx.config, environment, bronze_slug(ctx))
         vars_json = json.dumps(rendered, separators=(",", ":"))
         ctx.logger.info(
             "dbt run (%s) project=%s org=%s property=%s slug=%s",

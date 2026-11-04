@@ -28,7 +28,7 @@ from pep_connector.drive import (
 from pep_connector.load import STREAM_COLUMNS, ensure_bronze, load_bronze
 from pep_connector.manifest import KEY, manifest
 from pep_connector.prepare import FileSummary, PreparedRun, prepare_run
-from pep_connector.transform import dbt_vars, run_dbt, target_environments
+from pep_connector.transform import bronze_slug, dbt_vars, run_dbt, target_environments
 
 
 def file_line(item: FileSummary) -> str:
@@ -151,7 +151,7 @@ def _load_batches(ctx: RunContext, prepared: PreparedRun) -> tuple[list[dict[str
     for batch in prepared.batches.values():
         ctx.report("stream.started", stream=batch.stream)
         for environment in target_environments(ctx):
-            rendered = dbt_vars(ctx.config, environment, ctx.connection_id)
+            rendered = dbt_vars(ctx.config, environment, bronze_slug(ctx))
             try:
                 result = load_bronze(
                     batch.staging_csv,
@@ -193,7 +193,7 @@ def _load_batches(ctx: RunContext, prepared: PreparedRun) -> tuple[list[dict[str
 
 def _ensure_sources(ctx: RunContext) -> None:
     for environment in target_environments(ctx):
-        rendered = dbt_vars(ctx.config, environment, ctx.connection_id)
+        rendered = dbt_vars(ctx.config, environment, bronze_slug(ctx))
         for stream in STREAM_COLUMNS:
             ensure_bronze(rendered["bq_project"], rendered["org_id"], rendered["property_slug"], stream)
 

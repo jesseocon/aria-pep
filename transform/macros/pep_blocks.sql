@@ -45,3 +45,30 @@
 {% macro pep_int(column) -%}
   SAFE_CAST(NULLIF(REGEXP_REPLACE(TRIM({{ column }}), r'[,]', ''), '') AS INT64)
 {%- endmacro %}
+
+{#- Snapshot streams (occupancy forecast) keep every export. Silver follows bronze: the
+    snapshots loaded since silver last ran replace silver's rows for those same snapshots. -#}
+
+{% macro pep_new_snapshots(table_name) -%}
+  SELECT DISTINCT SAFE.PARSE_DATE('%Y-%m-%d', block_start_date)
+  FROM {{ source('pep', table_name) }}
+  WHERE _loaded_at > (
+    SELECT COALESCE(MAX(_bronze_loaded_at), TIMESTAMP '1970-01-01')
+    FROM {{ this }}
+  )
+{%- endmacro %}
+
+{% macro pep_snapshot_rows(table_name) -%}
+  SELECT *
+  FROM {{ source('pep', table_name) }}
+  {% if is_incremental() %}
+  WHERE SAFE.PARSE_DATE('%Y-%m-%d', block_start_date) IN ({{ pep_new_snapshots(table_name) }})
+  {% endif %}
+{%- endmacro %}
+
+{% macro pep_delete_snapshots(table_name) -%}
+  {%- if is_incremental() -%}
+    DELETE FROM {{ this }}
+    WHERE as_of_date IN ({{ pep_new_snapshots(table_name) }})
+  {%- endif -%}
+{%- endmacro %}

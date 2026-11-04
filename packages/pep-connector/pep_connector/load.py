@@ -8,6 +8,8 @@ Staging is overwritten every run. Bronze is merged into, never rebuilt.
 - Daily reports: each export is the whole truth for its date range. Bronze
   rows inside that range are replaced by the export's rows in one transaction;
   rows outside it are not touched.
+- Snapshot reports (occupancy forecast): every export is kept. One replaces
+  only an earlier export that starts on the same day.
 """
 
 from __future__ import annotations
@@ -27,6 +29,7 @@ STREAM_COLUMNS: dict[str, list[str]] = {
     RESERVATIONS: OUTPUT_HEADERS,
     **{stream.name: stream.output_headers for stream in REPORT_STREAMS},
 }
+SNAPSHOT_STREAMS = frozenset(stream.name for stream in REPORT_STREAMS if stream.snapshot)
 
 
 @dataclass(frozen=True)
@@ -91,6 +94,18 @@ WHEN MATCHED AND S.range_end >= T.range_end THEN UPDATE SET
 WHEN NOT MATCHED THEN
   INSERT ({insert_columns})
   VALUES ({insert_values})"""
+
+
+def replace_snapshots_sql(staging: str, bronze: str, stream: str) -> str:
+    """Snapshot streams: an export replaces only an earlier export that starts on the same day."""
+    names = ", ".join(f"`{name}`" for name in STREAM_COLUMNS[stream])
+    return f"""BEGIN TRANSACTION;
+DELETE FROM {_quoted(bronze)}
+WHERE block_start_date IN (SELECT DISTINCT block_start_date FROM {_quoted(staging)});
+INSERT INTO {_quoted(bronze)} ({names}, `_run_id`, `_loaded_at`)
+SELECT {names}, @run_id, CURRENT_TIMESTAMP()
+FROM {_quoted(staging)};
+COMMIT TRANSACTION;"""
 
 
 def replace_blocks_sql(staging: str, bronze: str, stream: str) -> str:
@@ -162,7 +177,12 @@ def load_bronze(
     table.expires = _now() + STAGING_EXPIRY
     bq.update_table(table, ["expires"])
 
-    sql = merge_bronze_sql(staging, bronze) if stream == RESERVATIONS else replace_blocks_sql(staging, bronze, stream)
+    if stream == RESERVATIONS:
+        sql = merge_bronze_sql(staging, bronze)
+    elif stream in SNAPSHOT_STREAMS:
+        sql = replace_snapshots_sql(staging, bronze, stream)
+    else:
+        sql = replace_blocks_sql(staging, bronze, stream)
     merge_job = bq.query(
         sql,
         job_config=bigquery.QueryJobConfig(
