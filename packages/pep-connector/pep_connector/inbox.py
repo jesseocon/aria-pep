@@ -1,8 +1,8 @@
 """PEP report packages emailed to the connection's inbox, in place of the Drive folder.
 
 Hilton's PEP report scheduler mails a package (a zip of CSV exports) to the connection's
-address, files+{inbox key}@reports.aria-ingest.com (the API shows it as the connection's
-inbox_address). The runner keeps every email as a raw .eml (ctx.inbox); a run reads the
+address, files-{inbox key}@reports.aria-ingest.com (the API shows it as the connection's
+inbox_address; PEP never delivers to the older files+{inbox key}@ form). The runner keeps every email as a raw .eml (ctx.inbox); a run reads the
 ones after its bookmark, saves their CSVs (zips unpacked) and heals them exactly as the
 Drive flow does, so bronze, silver and gold are the same tables.
 

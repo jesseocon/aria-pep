@@ -88,7 +88,7 @@ uv run pytest
 
 ## Email
 
-Each `pep_email` connection takes mail at `files+{inbox key}@reports.aria-ingest.com`: copy it from the connection page in the console (the API returns it as `inbox_address`); every run logs it. The runner keeps each email as a raw `.eml` (aria-runner `inbox` service), and the connection's schedule reads the new ones.
+Each `pep_email` connection takes mail at `files-{inbox key}@reports.aria-ingest.com`: copy it from the connection page in the console (the API returns it as `inbox_address`); every run logs it. Hilton's PEP scheduler never delivers to the older `files+{inbox key}@…` form (it still works for other senders), so give PEP the `-` address. The runner keeps each email as a raw `.eml` (aria-runner `inbox` service), and the connection's schedule reads the new ones.
 
 1. **Schedule the package in PEP** to that address. Any of the exports above load; zips are unpacked. Scenic's package (2026-11-03): Reservations today−90, today+90 and 90–365 days, Rate Plan Summary for the last 7 days, Occupancy Forecast for the next 90 days.
 2. **Each run** reads the emails since its bookmark, saves their CSVs as `<received UTC>_<n>_<name>` and heals them as the Drive flow does. Names sort by arrival, so the later email wins a reservation or a day. Then staging, bronze and dbt as above, and the bookmark moves.
