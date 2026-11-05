@@ -147,7 +147,7 @@ def email_manifest() -> dict[str, Any]:
         "key": EMAIL_KEY,
         "display_name": "PEP - Email",
         "version": _version(),
-        "description": "Hilton PEP report packages emailed on a schedule to the connection's address (shown on the connection; files-…@reports.aria-ingest.com) to bronze, silver and gold: the same tables as PEP (Drive).",
+        "description": "Hilton PEP report packages emailed on a schedule to the connection's address (shown on the connection; files-…@aria-ingest.com) to bronze, silver and gold: the same tables as PEP (Drive).",
         "job": {"name": JOB_NAME, "timeout_seconds": 60 * 60},
         "inbox": True,
         "inbox_local_part": "files",
