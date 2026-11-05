@@ -56,12 +56,7 @@ class PepEmailConnector:
             ctx.report("notice", code="reprocess", message=f"reading every email received from {moment.isoformat()} again")
 
         with _step(ctx, "extract"):
-            outcome = fetch_inbox(
-                ctx.inbox,
-                cursor,
-                ctx.work_dir / "parsed",
-                allowed_senders=[str(item) for item in ctx.config.get("allowed_senders") or []],
-            )
+            outcome = fetch_inbox(ctx.inbox, cursor, ctx.work_dir / "parsed")
         _report_outcome(ctx, outcome)
 
         metrics: dict[str, Any] = {
@@ -105,10 +100,7 @@ def _report_outcome(ctx: RunContext, outcome: InboxOutcome) -> None:
     if outcome.messages == 0:
         ctx.report("notice", code="no_new_email", message="no new email since the last run")
     for item in outcome.ignored:
-        if item.reason == "sender_not_allowed":
-            ctx.report("warning", code="sender_not_allowed", message=f"email from {item.sender} skipped: not an allowed sender ({item.name})")
-        else:
-            ctx.report("notice", code="ignored_email", message=f"email from {item.sender} ({item.subject!r}) has no CSV export ({item.name})")
+        ctx.report("notice", code="ignored_email", message=f"email from {item.sender} ({item.subject!r}) has no CSV export ({item.name})")
     if outcome.prepared is not None:
         log_prepared(ctx.logger, outcome.prepared, outcome.unrecognized, {})
     for name, error in outcome.failed.items():
