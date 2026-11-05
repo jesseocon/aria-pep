@@ -136,13 +136,11 @@ def test_an_emailed_package_heals_like_drive_files(tmp_path: Path, store: FileSe
         }
     )
     mailbox.put_message(store, ORG, CONNECTION, _mail(package), received_at=DAY, sender=SENDER)
-    mailbox.put_message(store, ORG, CONNECTION, _mail(package, sender="someone@else.example"), received_at=DAY + timedelta(minutes=1))
 
     box = mailbox.Mailbox(store, ORG, CONNECTION)
-    outcome = fetch_inbox(box, mailbox.Cursor(), tmp_path / "work", allowed_senders=["@hilton.com"])
+    outcome = fetch_inbox(box, mailbox.Cursor(), tmp_path / "work")
 
-    assert outcome.status == "ready" and outcome.messages == 2 and not outcome.failed
-    assert [item.reason for item in outcome.ignored] == ["sender_not_allowed"]
+    assert outcome.status == "ready" and outcome.messages == 1 and not outcome.failed and not outcome.ignored
     assert set(outcome.prepared.batches) == {"reservations", "occupancy_forecast"}
     assert outcome.prepared.batches["reservations"].rows == 3
     assert sorted(outcome.files) == sorted(
@@ -152,6 +150,23 @@ def test_an_emailed_package_heals_like_drive_files(tmp_path: Path, store: FileSe
 
     again = fetch_inbox(box, outcome.cursor, tmp_path / "work")
     assert again.messages == 0 and again.status == "empty"
+
+
+def test_a_relayed_package_from_an_unknown_sender_is_read(tmp_path: Path, store: FileSessionStore) -> None:
+    # A Gmail auto-forward: the envelope and From are the forwarder, not Hilton.
+    package = _zip(**{"reservations-today-plus-90.csv": _trimmed(_row(1), _row(2))})
+    relayed = _mail(package, sender="Front Desk <frontdesk.relay@gmail.com>")
+    mailbox.put_message(store, ORG, CONNECTION, relayed, received_at=DAY, sender="frontdesk.relay+caf_=files@gmail.com")
+
+    outcome = fetch_inbox(mailbox.Mailbox(store, ORG, CONNECTION), mailbox.Cursor(), tmp_path / "work")
+
+    assert outcome.status == "ready" and not outcome.ignored and not outcome.failed
+    assert outcome.prepared.batches["reservations"].rows == 2
+
+
+def test_allowed_senders_is_still_accepted_and_has_no_effect() -> None:
+    schema = email_manifest()["config_schema"]["properties"]["allowed_senders"]
+    assert schema["deprecated"] is True and "default" not in schema
 
 
 def test_the_email_manifest_is_an_inbox_connector() -> None:

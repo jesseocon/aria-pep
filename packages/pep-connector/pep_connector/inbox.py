@@ -9,6 +9,9 @@ Drive flow does, so bronze, silver and gold are the same tables.
 Each saved file is named `<received UTC>_<n>_<attachment name>`. Names sort by arrival, so
 between two emails of one run the later one supplies a reservation or a day, as a later
 Drive file does.
+
+Every email in the inbox is read, whoever sent it (PEP itself, a relay, a Gmail auto-forward):
+the address's inbox key keeps other mail out. A package proves itself as it heals.
 """
 
 from __future__ import annotations
@@ -75,7 +78,6 @@ def fetch_inbox(
     cursor: mailbox.Cursor,
     output_dir: Path,
     *,
-    allowed_senders: list[str] | None = None,
     limit: int = MAX_MESSAGES,
 ) -> InboxOutcome:
     """Save the CSV exports of every new email and heal them. The inbox is not changed;
@@ -95,13 +97,9 @@ def fetch_inbox(
             after.advance(message)
             continue
         email = mailbox.parse_email(inbox.read(message))
-        if not mailbox.sender_allowed(allowed_senders or [], message.envelope_from, email.sender):
-            outcome.ignored.append(IgnoredEmail(message.name, email.sender or message.envelope_from, email.subject, "sender_not_allowed"))
-            after.advance(message)
-            continue
         reports = [item for item in mailbox.expand_archives(email.attachments) if item.filename.lower().endswith(".csv")]
         if not reports:
-            outcome.ignored.append(IgnoredEmail(message.name, email.sender, email.subject, "no_csv_attachment"))
+            outcome.ignored.append(IgnoredEmail(message.name, email.sender or message.envelope_from, email.subject, "no_csv_attachment"))
         for index, item in enumerate(reports, start=1):
             name = saved_name(message.received_at, index, item.filename)
             (folder / name).write_bytes(item.data)

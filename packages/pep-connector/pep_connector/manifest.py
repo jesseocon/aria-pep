@@ -98,10 +98,10 @@ EMAIL_CONFIG_SCHEMA: dict[str, Any] = {
         },
         "allowed_senders": {
             "type": "array",
-            "title": "Allowed senders",
-            "description": "Addresses or @domain, e.g. @hilton.com. Email from anyone else is skipped. Empty takes any sender.",
+            "title": "Allowed senders (no longer used)",
+            "description": "Not used: email from any sender is read, so relays and forwards work. Kept so connections that set it still save.",
             "items": {"type": "string"},
-            "default": [],
+            "deprecated": True,
         },
         "expected_reports": {
             "type": "array",
