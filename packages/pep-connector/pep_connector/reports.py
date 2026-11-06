@@ -1,4 +1,5 @@
-"""Heal PEP daily report exports: rate plan summary, occupancy summary and forecast, transactions.
+"""Heal PEP daily report exports: rate plan summary, occupancy summary and forecast, transactions,
+and the Final Audit (an Excel workbook, turned into CSV by pep_connector.final_audit).
 
 Ported from aria-lighthouse/packages/transform/src/pep/{rate-plan-summary,
 occupancy-summary,transactions}. Each export is the whole truth for its date
@@ -7,12 +8,15 @@ range (`block_start_date`..`block_end_date`), so bronze replaces that range.
 
 from __future__ import annotations
 
+import csv
+import io
 import re
 from dataclasses import dataclass
 from typing import Callable
 
 from pep_connector.assemble import CONFIRMATION as CONFIRMATION_PATTERN
 from pep_connector.assemble import COUNT, DATE, MONEY, TIME, Layout, assemble, optional, required
+from pep_connector.final_audit import CSV_HEADINGS as FINAL_AUDIT_HEADINGS
 from pep_connector.parse import parse_csv_records
 
 BLOCK_COLUMNS = [
@@ -581,4 +585,30 @@ TRANSACTIONS = ReportStream(
     trim_dates=False,
     header_anywhere=True,
 )
-REPORT_STREAMS = [RATE_PLAN_SUMMARY, OCCUPANCY_SUMMARY, OCCUPANCY_FORECAST, TRANSACTIONS]
+FINAL_AUDIT_HEADERS = [re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_") for name in FINAL_AUDIT_HEADINGS]
+
+
+def heal_final_audit(text: str) -> ReportHeal:
+    """One record per Final Audit line; the converter already wrote one CSV row per line."""
+    reader = csv.reader(io.StringIO(text))
+    header = next(reader, None)
+    if header != FINAL_AUDIT_HEADINGS:
+        msg = "Final Audit CSV does not have the expected headings"
+        raise ValueError(msg)
+    records = []
+    for number, row in enumerate(reader, start=2):
+        fields = [*row[: len(FINAL_AUDIT_HEADERS)], *[""] * (len(FINAL_AUDIT_HEADERS) - len(row))]
+        status = "ok" if display_date(fields[0]) and fields[4] else "quarantined"
+        records.append(ReportRecord(fields, number, status, ""))
+    return ReportHeal(records, 1)
+
+
+FINAL_AUDIT = ReportStream(
+    name="final_audit",
+    file_prefix="final-audit",
+    header_start='"Business Date","Section","Group"',
+    headers=FINAL_AUDIT_HEADERS,
+    heal=heal_final_audit,
+    kept=frozenset({"ok"}),
+)
+REPORT_STREAMS = [RATE_PLAN_SUMMARY, OCCUPANCY_SUMMARY, OCCUPANCY_FORECAST, TRANSACTIONS, FINAL_AUDIT]

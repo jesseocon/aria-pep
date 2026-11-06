@@ -17,3 +17,5 @@ sources:
         identifier: "pep__occupancy_forecast_{{ var('property_slug') }}"
       - name: transactions
         identifier: "pep__transactions_{{ var('property_slug') }}"
+      - name: final_audit
+        identifier: "pep__final_audit_{{ var('property_slug') }}"

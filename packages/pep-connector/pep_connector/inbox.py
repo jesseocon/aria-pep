@@ -25,6 +25,7 @@ from zoneinfo import ZoneInfo
 
 from aria_runner import mailbox
 
+from pep_connector.final_audit import xlsx_to_csv
 from pep_connector.prepare import RESERVATIONS, PreparedRun, prepare_run
 from pep_connector.reports import OCCUPANCY_FORECAST, RATE_PLAN_SUMMARY
 
@@ -73,6 +74,20 @@ def saved_name(received: datetime, index: int, filename: str) -> str:
     return f"{received.astimezone(ZoneInfo('UTC')):%Y%m%dT%H%M%SZ}_{index}_{base}"
 
 
+def _reports(attachments: list[mailbox.Attachment]) -> list[tuple[str, bytes]]:
+    """The CSV exports, plus each Final Audit workbook turned into CSV; other files are skipped."""
+    out: list[tuple[str, bytes]] = []
+    for item in attachments:
+        name = item.filename.lower()
+        if name.endswith(".csv"):
+            out.append((item.filename, item.data))
+        elif name.endswith(".xlsx"):
+            text = xlsx_to_csv(item.data)
+            if text is not None:
+                out.append((item.filename.rsplit(".", 1)[0] + ".csv", text.encode()))
+    return out
+
+
 def fetch_inbox(
     inbox: mailbox.Mailbox,
     cursor: mailbox.Cursor,
@@ -97,12 +112,12 @@ def fetch_inbox(
             after.advance(message)
             continue
         email = mailbox.parse_email(inbox.read(message))
-        reports = [item for item in mailbox.expand_archives(email.attachments) if item.filename.lower().endswith(".csv")]
+        reports = _reports(mailbox.expand_archives(email.attachments))
         if not reports:
             outcome.ignored.append(IgnoredEmail(message.name, email.sender or message.envelope_from, email.subject, "no_csv_attachment"))
-        for index, item in enumerate(reports, start=1):
-            name = saved_name(message.received_at, index, item.filename)
-            (folder / name).write_bytes(item.data)
+        for index, (filename, data) in enumerate(reports, start=1):
+            name = saved_name(message.received_at, index, filename)
+            (folder / name).write_bytes(data)
             outcome.files[name] = message.name
             outcome.received[name] = message.received_at
         after.advance(message)
