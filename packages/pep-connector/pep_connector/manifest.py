@@ -80,7 +80,14 @@ def manifest() -> dict[str, Any]:
 
 
 EMAIL_KEY = "pep_email"
-EMAIL_STREAMS = ["reservations", "rate_plan_summary", "occupancy_summary", "occupancy_forecast", "transactions"]
+EMAIL_STREAMS = [
+    "reservations",
+    "rate_plan_summary",
+    "occupancy_summary",
+    "occupancy_forecast",
+    "transactions",
+    "final_audit",
+]
 
 EMAIL_CONFIG_SCHEMA: dict[str, Any] = {
     "type": "object",
