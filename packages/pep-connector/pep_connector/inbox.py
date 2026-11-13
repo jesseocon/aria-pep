@@ -48,6 +48,20 @@ class IgnoredEmail:
 
 
 @dataclass
+class SkippedAttachment:
+    """An attachment that looked like a report but could not be read: the run raises an alert for it."""
+
+    email: str
+    sender: str
+    filename: str
+    reason: str
+
+
+# Attachments that are never reports (logos and calendar invites in signatures): skipped without an alert.
+_NOT_REPORTS = re.compile(r"\.(png|jpe?g|gif|bmp|svg|webp|ics|vcf|p7s|eml)$", re.IGNORECASE)
+
+
+@dataclass
 class InboxOutcome:
     status: str
     cursor: mailbox.Cursor
@@ -57,6 +71,7 @@ class InboxOutcome:
     files: dict[str, str] = field(default_factory=dict)  # saved name -> email object
     received: dict[str, datetime] = field(default_factory=dict)  # saved name -> arrival
     ignored: list[IgnoredEmail] = field(default_factory=list)
+    skipped: list[SkippedAttachment] = field(default_factory=list)
     more: bool = False
 
     @property
@@ -76,7 +91,14 @@ def saved_name(received: datetime, index: int, filename: str) -> str:
 
 def _reports(attachments: list[mailbox.Attachment]) -> list[tuple[str, bytes]]:
     """The CSV exports, plus each Final Audit workbook turned into CSV; other files are skipped."""
+    return _sort_attachments(attachments)[0]
+
+
+def _sort_attachments(attachments: list[mailbox.Attachment]) -> tuple[list[tuple[str, bytes]], list[tuple[str, str]]]:
+    """(reports, skipped): the CSV exports and Final Audit workbooks (either PEP layout) as CSV, and each other
+    attachment that could have been a report with why it was skipped. Logos and invites are left out of both."""
     out: list[tuple[str, bytes]] = []
+    skipped: list[tuple[str, str]] = []
     for item in attachments:
         name = item.filename.lower()
         if name.endswith(".csv"):
@@ -85,7 +107,11 @@ def _reports(attachments: list[mailbox.Attachment]) -> list[tuple[str, bytes]]:
             text = xlsx_to_csv(item.data)
             if text is not None:
                 out.append((item.filename.rsplit(".", 1)[0] + ".csv", text.encode()))
-    return out
+            else:
+                skipped.append((item.filename, "a workbook that is not a Final Audit (send PEP's reports as CSV)"))
+        elif not _NOT_REPORTS.search(name):
+            skipped.append((item.filename, "not a CSV or Excel report"))
+    return out, skipped
 
 
 def fetch_inbox(
@@ -112,7 +138,9 @@ def fetch_inbox(
             after.advance(message)
             continue
         email = mailbox.parse_email(inbox.read(message))
-        reports = _reports(mailbox.expand_archives(email.attachments))
+        reports, skipped = _sort_attachments(mailbox.expand_archives(email.attachments))
+        for filename, reason in skipped:
+            outcome.skipped.append(SkippedAttachment(message.name, email.sender or message.envelope_from, filename, reason))
         if not reports:
             outcome.ignored.append(IgnoredEmail(message.name, email.sender or message.envelope_from, email.subject, "no_csv_attachment"))
         for index, (filename, data) in enumerate(reports, start=1):
