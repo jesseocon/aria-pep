@@ -101,6 +101,16 @@ def _report_outcome(ctx: RunContext, outcome: InboxOutcome) -> None:
         ctx.report("notice", code="no_new_email", message="no new email since the last run")
     for item in outcome.ignored:
         ctx.report("notice", code="ignored_email", message=f"email from {item.sender} ({item.subject!r}) has no CSV export ({item.name})")
+    # A report someone sent that was not loaded must never pass silently: each one is an alerting warning.
+    for skipped in outcome.skipped:
+        ctx.report(
+            "warning",
+            code="ignored_attachment",
+            message=f"{skipped.filename} from {skipped.sender} was not loaded: {skipped.reason} (email {skipped.email})",
+            alert=True,
+        )
+    for name in outcome.unrecognized:
+        ctx.report("warning", code="unrecognized_report", message=f"{name} is not a PEP report this connector reads", alert=True)
     if outcome.prepared is not None:
         log_prepared(ctx.logger, outcome.prepared, outcome.unrecognized, {})
     for name, error in outcome.failed.items():
