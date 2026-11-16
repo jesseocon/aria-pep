@@ -126,9 +126,10 @@ COMMIT TRANSACTION;"""
 
 
 def _client(project: str, client: Any) -> Any:
-    from google.cloud import bigquery
+    from aria_runner import bq
 
-    return client if client is not None else bigquery.Client(project=project)
+    # Requests time out (120 s) when a call sets none; the client's retry repeats them.
+    return client if client is not None else bq.client(project)
 
 
 def ensure_bronze(project: str, org_id: str, slug: str, stream: str, client: Any = None) -> str:
