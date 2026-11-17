@@ -15,18 +15,19 @@ ENV PYTHONUNBUFFERED=1 \
 
 RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates \
     && rm -rf /var/lib/apt/lists/* \
-    && pip install uv==0.5.29 \
+    && pip install uv==0.13.0 \
     && useradd --create-home --uid 10001 runner
 
 COPY --from=aria-runner /app/pyproject.toml /app/README.md /app/aria-runner/
 COPY --from=aria-runner /app/src /app/aria-runner/src
 
 WORKDIR /app/pep
-COPY pyproject.toml README.md ./
+COPY pyproject.toml uv.lock README.md ./
 COPY packages ./packages
 COPY transform ./transform
 
-RUN uv sync --no-dev \
+# Exactly as locked (uv.lock), so a rebuild cannot pick up a newer library.
+RUN uv sync --frozen --no-dev \
     && python -m aria_runner connectors export pep --out /app/pep/connector-manifest.json \
     && chown -R runner:runner /app/pep
 
