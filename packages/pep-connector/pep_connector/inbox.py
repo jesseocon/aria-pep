@@ -69,6 +69,8 @@ class InboxOutcome:
     messages: int = 0
     repeats: int = 0
     files: dict[str, str] = field(default_factory=dict)  # saved name -> email object
+    originals: dict[str, str] = field(default_factory=dict)  # saved name -> attachment as emailed
+    repeated: list[str] = field(default_factory=list)  # email objects read before (same sha256)
     received: dict[str, datetime] = field(default_factory=dict)  # saved name -> arrival
     ignored: list[IgnoredEmail] = field(default_factory=list)
     skipped: list[SkippedAttachment] = field(default_factory=list)
@@ -135,10 +137,13 @@ def fetch_inbox(
         outcome.messages += 1
         if after.is_repeat(message):
             outcome.repeats += 1
+            outcome.repeated.append(message.name)
             after.advance(message)
             continue
         email = mailbox.parse_email(inbox.read(message))
-        reports, skipped = _sort_attachments(mailbox.expand_archives(email.attachments))
+        attachments = mailbox.expand_archives(email.attachments)
+        sent = {item.filename for item in attachments}
+        reports, skipped = _sort_attachments(attachments)
         for filename, reason in skipped:
             outcome.skipped.append(SkippedAttachment(message.name, email.sender or message.envelope_from, filename, reason))
         if not reports:
@@ -147,6 +152,8 @@ def fetch_inbox(
             name = saved_name(message.received_at, index, filename)
             (folder / name).write_bytes(data)
             outcome.files[name] = message.name
+            # A Final Audit workbook is read as CSV: the file as emailed is the .xlsx.
+            outcome.originals[name] = filename if filename in sent else filename.rsplit(".", 1)[0] + ".xlsx"
             outcome.received[name] = message.received_at
         after.advance(message)
 

@@ -39,6 +39,8 @@ class SyncOutcome:
     source_streams: dict[str, str] = field(default_factory=dict)
     unrecognized: list[str] = field(default_factory=list)
     failed: dict[str, str] = field(default_factory=dict)
+    # Each downloaded file's local name -> its name in Drive.
+    originals: dict[str, str] = field(default_factory=dict)
 
 
 def drive_impersonate() -> str:
@@ -262,6 +264,7 @@ def fetch_drive(
         source_streams=source_streams,
         unrecognized=[names[by_local[local]] for local in prepared.unrecognized],
         failed={names[by_local[local]]: error for local, error in prepared.failed.items()},
+        originals={local: names[file_id] for file_id, local in local_names.items()},
     )
 
 

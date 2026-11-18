@@ -211,6 +211,9 @@ def test_a_skipped_attachment_raises_an_alert() -> None:
         def report(self, kind: str, **fields: object) -> None:
             self.events.append((kind, fields))
 
+        def report_file(self, source: str, result: str, **fields: object) -> None:
+            self.events.append(("file", {"source": source, "result": result, **fields}))
+
     ctx = Ctx()
     outcome = InboxOutcome(status="empty", cursor=mailbox.Cursor(None, []), messages=1)
     outcome.skipped.append(SkippedAttachment("20261113T153839Z_x.eml", "jesse@example.com", "Final Audit.pdf", "not a CSV or Excel report"))
@@ -218,3 +221,7 @@ def test_a_skipped_attachment_raises_an_alert() -> None:
     warning = next(fields for kind, fields in ctx.events if kind == "warning")
     assert warning["code"] == "ignored_attachment" and warning["alert"] is True
     assert "Final Audit.pdf" in str(warning["message"])
+    # The Files tab shows it too: that email's attachment, not loaded, and why.
+    file = next(fields for kind, fields in ctx.events if kind == "file")
+    assert file == {"source": "20261113T153839Z_x.eml", "result": "ignored", "name": "Final Audit.pdf",
+                    "reason": "not a CSV or Excel report"}
