@@ -19,7 +19,7 @@ from typing import Any
 from aria_runner import mailbox
 from aria_runner.sdk import RunContext, RunResult
 
-from pep_connector.connector import _load, _step, _transform, log_prepared
+from pep_connector.connector import _load, _step, _transform, log_prepared, report_files
 from pep_connector.inbox import (
     DEFAULT_ALERT_TIMEZONE,
     EXPECTED_REPORTS,
@@ -68,6 +68,8 @@ class PepEmailConnector:
         }
         if outcome.prepared is not None and outcome.prepared.batches:
             loads, failed_streams = _load(ctx, outcome.prepared)
+            report_files(ctx, outcome.prepared, failed_streams,
+                         lambda saved: (outcome.files.get(saved, saved), outcome.originals.get(saved, saved)))
             metrics["dbt"] = _transform(ctx)
             metrics["bronze"] = loads
             metrics["rows"] = outcome.prepared.rows
@@ -78,6 +80,10 @@ class PepEmailConnector:
                     "; ".join(f"stream {name} did not load" for name in sorted(failed_streams))
                     + ". The inbox bookmark did not move; the next run reads the same emails again."
                 )
+
+        elif outcome.prepared is not None:
+            report_files(ctx, outcome.prepared, set(),
+                         lambda saved: (outcome.files.get(saved, saved), outcome.originals.get(saved, saved)))
 
         state = {
             **ctx.state,
@@ -99,8 +105,13 @@ def _report_outcome(ctx: RunContext, outcome: InboxOutcome) -> None:
     )
     if outcome.messages == 0:
         ctx.report("notice", code="no_new_email", message="no new email since the last run")
+    for name in outcome.repeated:
+        ctx.report_file(name, "duplicate", reason="the same email arrived before; read once")
     for item in outcome.ignored:
         ctx.report("notice", code="ignored_email", message=f"email from {item.sender} ({item.subject!r}) has no CSV export ({item.name})")
+        ctx.report_file(item.name, "ignored", subject=item.subject, reason="no CSV or Final Audit attachment")
+    for skipped in outcome.skipped:
+        ctx.report_file(skipped.email, "ignored", name=skipped.filename, reason=skipped.reason)
     # A report someone sent that was not loaded must never pass silently: each one is an alerting warning.
     for skipped in outcome.skipped:
         ctx.report(

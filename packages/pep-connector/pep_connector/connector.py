@@ -13,6 +13,7 @@ import logging
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -66,6 +67,31 @@ def log_outcome(logger: logging.Logger, outcome: SyncOutcome) -> None:
         log_prepared(logger, outcome.prepared, outcome.unrecognized, outcome.failed)
 
 
+def report_files(
+    ctx: RunContext,
+    prepared: PreparedRun,
+    failed_streams: set[str],
+    where: Callable[[str], tuple[str, str]],
+) -> None:
+    """A file event for each file the run read (the console's Files tab): loaded with its rows,
+    failed (did not heal, or its stream did not load) or ignored (not a PEP report). `where`
+    turns a saved file's name into (source, name): the email object or Drive file, and the file
+    as it was sent. PEP files are snapshots, not business days: no days."""
+    for item in prepared.files:
+        source, name = where(item.source)
+        if item.stream in failed_streams:
+            ctx.report_file(source, "failed", name=name, stream=item.stream,
+                            reason=f"stream {item.stream} did not load; read again next run")
+        else:
+            ctx.report_file(source, "loaded", name=name, stream=item.stream, records=item.ok + item.healed)
+    for local, error in prepared.failed.items():
+        source, name = where(local)
+        ctx.report_file(source, "failed", name=name, reason=f"could not be healed: {error}"[:1000])
+    for local in prepared.unrecognized:
+        source, name = where(local)
+        ctx.report_file(source, "ignored", name=name, reason="not a PEP report this connector reads")
+
+
 class PepConnector:
     key = KEY
 
@@ -107,6 +133,7 @@ class PepConnector:
             return RunResult(metrics={"status": "empty", "unrecognized": outcome.unrecognized})
 
         loads, failed_streams = _load(ctx, outcome.prepared)
+        report_files(ctx, outcome.prepared, failed_streams, lambda local: (outcome.originals.get(local, local),) * 2)
         warehouses = _transform(ctx)
         moved = set(outcome.prepared.batches) - failed_streams
         finalize_drive(outcome, service=service, streams=moved)

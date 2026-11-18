@@ -148,6 +148,24 @@ def test_an_emailed_package_heals_like_drive_files(tmp_path: Path, store: FileSe
         for i, name in enumerate(["reservations-today-plus-90.csv", "reservations-90-365.csv", "occupancy-forecast-today-plus-90.csv"], 1)
     )
 
+    # The Files tab: each file loaded, named as emailed (the zip member), in the email it came in.
+    from pep_connector.connector import report_files
+
+    events: list[dict] = []
+
+    class Ctx:
+        def report_file(self, source: str, result: str, **fields: object) -> None:
+            events.append({"source": source, "result": result, **fields})
+
+    email_object = box.messages()[0].name
+    report_files(Ctx(), outcome.prepared, {"occupancy_forecast"},
+                 lambda saved: (outcome.files.get(saved, saved), outcome.originals.get(saved, saved)))
+    loaded = sorted((e["name"], e["records"]) for e in events if e["result"] == "loaded")
+    assert loaded == [("aria-reporting.zip/reservations-90-365.csv", 1), ("aria-reporting.zip/reservations-today-plus-90.csv", 2)]
+    [failed] = [e for e in events if e["result"] == "failed"]
+    assert failed["name"] == "aria-reporting.zip/occupancy-forecast-today-plus-90.csv" and "did not load" in failed["reason"]
+    assert {e["source"] for e in events} == {email_object}
+
     again = fetch_inbox(box, outcome.cursor, tmp_path / "work")
     assert again.messages == 0 and again.status == "empty"
 

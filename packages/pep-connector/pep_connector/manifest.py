@@ -74,6 +74,8 @@ def manifest() -> dict[str, Any]:
         "description": "Hilton PEP reservation files to PMS stay nights and reservation-night OTB.",
         "job": {"name": JOB_NAME, "timeout_seconds": 60 * 60},
         "progress": "v1",
+        # Each Drive file it reads is reported (file events): connections show a Files tab.
+        "reads_files": True,
         "config_schema": CONFIG_SCHEMA,
         "run_params_schema": RUN_PARAMS_SCHEMA,
     }
@@ -157,6 +159,8 @@ def email_manifest() -> dict[str, Any]:
         "description": "Hilton PEP report packages emailed on a schedule to the connection's address (shown on the connection; files-…@aria-ingest.com) to bronze, silver and gold: the same tables as PEP (Drive).",
         "job": {"name": JOB_NAME, "timeout_seconds": 60 * 60},
         "inbox": True,
+        # The Files tab only: PEP's own mail reads "From Hilton", anyone else's "Forwarded".
+        "inbox_vendor": {"name": "Hilton", "senders": ["*@hilton.com", "*@*.hilton.com"]},
         "inbox_local_part": "files",
         "progress": "v1",
         "config_schema": EMAIL_CONFIG_SCHEMA,
